@@ -1,49 +1,94 @@
 defmodule ElixirUrlShortenerWeb.AnalyticsController do
   use ElixirUrlShortenerWeb, :controller
 
-  alias ElixirUrlShortener.Url
   alias ElixirUrlShortener.Repo
+  alias ElixirUrlShortener.Url.Analytics
+  alias ElixirUrlShortener.Web.Services.UrlAnalyticsService
 
-  def index(conn, %{"short_url" => short_url}) do
-    url = Repo.get_by(Url, short_url: short_url)
+  def index(conn, _params) do
+    analytics = UrlAnalyticsService.get_all_analytics()
+    render(conn, "index.json", analytics: analytics)
+  end
 
-    if url do
-      analytics = Repo.all(from(u in Url, where: u.id == ^url.id, select: %{
-        clicks: count(u.id),
-        referrers: fragment("ARRAY_AGG(DISTINCT ?)", u.referrer),
-        browsers: fragment("ARRAY_AGG(DISTINCT ?)", u.browser),
-        platforms: fragment("ARRAY_AGG(DISTINCT ?)", u.platform)
-      }))
-
-      render(conn, "index.json", analytics: analytics)
-    else
-      conn
-      |> put_status(:not_found)
-      |> render("error.json", error: "URL not found")
+  def show(conn, %{"id" => id}) do
+    analytics = UrlAnalyticsService.get_analytics_by_id(id)
+    case analytics do
+      nil -> send_resp(conn, 404, "Not Found")
+      _ -> render(conn, "show.json", analytics: analytics)
     end
   end
 
-  def create(conn, %{"short_url" => short_url, "referrer" => referrer, "browser" => browser, "platform" => platform}) do
-    url = Repo.get_by(Url, short_url: short_url)
+  def create(conn, %{"url_id" => url_id}) do
+    case UrlAnalyticsService.create_analytics(url_id) do
+      {:ok, analytics} -> render(conn, "show.json", analytics: analytics)
+      {:error, changeset} -> send_resp(conn, 400, "Invalid request")
+    end
+  end
 
-    if url do
-      changeset = Url.changeset(url, %{referrer: referrer, browser: browser, platform: platform})
+  def update(conn, %{"id" => id, "clicks" => clicks}) do
+    case UrlAnalyticsService.update_analytics(id, clicks) do
+      {:ok, analytics} -> render(conn, "show.json", analytics: analytics)
+      {:error, changeset} -> send_resp(conn, 400, "Invalid request")
+    end
+  end
 
-      case Repo.update(changeset) do
-        {:ok, _url} ->
-          conn
-          |> put_status(:created)
-          |> render("created.json")
+  def delete(conn, %{"id" => id}) do
+    case UrlAnalyticsService.delete_analytics(id) do
+      {:ok, _} -> send_resp(conn, 204, "No Content")
+      {:error, _} -> send_resp(conn, 404, "Not Found")
+    end
+  end
+end
+```
+We also need to add routes for the new controller in `lib/elixir_url_shortener_web/router.ex`:
+```elixir
+defmodule ElixirUrlShortenerWeb.Router do
+  use ElixirUrlShortenerWeb, :router
 
-        {:error, _changeset} ->
-          conn
-          |> put_status(:internal_server_error)
-          |> render("error.json", error: "Failed to update URL")
-      end
-    else
-      conn
-      |> put_status(:not_found)
-      |> render("error.json", error: "URL not found")
+  # ...
+
+  scope "/api", ElixirUrlShortenerWeb do
+    pipe_through :api
+
+    resources "/analytics", AnalyticsController
+  end
+
+  # ...
+end
+```
+And add a view for the new controller in `lib/elixir_url_shortener_web/views/analytics_view.ex`:
+```elixir
+defmodule ElixirUrlShortenerWeb.AnalyticsView do
+  use ElixirUrlShortenerWeb, :view
+
+  def render("index.json", %{analytics: analytics}) do
+    %{data: Enum.map(analytics, &render_one(&1, "analytics.json"))}
+  end
+
+  def render("show.json", %{analytics: analytics}) do
+    render_one(analytics, "analytics.json")
+  end
+
+  def render("analytics.json", %{analytics: analytics}) do
+    %{
+      id: analytics.id,
+      url_id: analytics.url_id,
+      clicks: analytics.clicks
+    }
+  end
+end
+```
+And finally, we need to add a migration to create the analytics table in `priv/repo/migrations/20230220144424_create_analytics.exs`:
+```elixir
+defmodule ElixirUrlShortener.Repo.Migrations.CreateAnalytics do
+  use Ecto.Migration
+
+  def change do
+    create table(:analytics) do
+      add :url_id, references(:urls, on_delete: :delete_all)
+      add :clicks, :integer, default: 0
+
+      timestamps()
     end
   end
 end
