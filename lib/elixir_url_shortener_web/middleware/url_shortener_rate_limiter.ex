@@ -51,21 +51,3 @@ defmodule ElixirUrlShortenerWeb.Middleware.UrlShortenerRateLimiter do
     end
   end
 end
-```
-In the `lib/elixir_url_shortener_web/endpoint.ex` file, add the following line to the `plug` block:
-```elixir
-plug ElixirUrlShortenerWeb.Middleware.UrlShortenerRateLimiter
-```
-This will apply the rate limiter middleware to all incoming requests.
-
-In the `config/config.exs` file, add the following configuration for the Cachex cache:
-```elixir
-config :cachex,
-  caches: [
-    url_shortener_cache: [
-      expiration: :timer.seconds(60),
-      stats: true
-    ]
-  ]
-```
-This will configure the Cachex cache to store the request counts for each IP address with a TTL of 60 seconds.
